@@ -9,6 +9,22 @@ interface KeycloakConfig {
   redirectUri: string;
 }
 
+const DEFAULT_ENCRYPTION_KEY = 'your-default-encryption-key';
+
+export function encrypt(
+  text: string,
+  key: string = DEFAULT_ENCRYPTION_KEY,
+): string {
+  return Buffer.from(text).toString('base64');
+}
+
+export function decrypt(
+  encryptedString: string,
+  key: string = DEFAULT_ENCRYPTION_KEY,
+): string {
+  return Buffer.from(encryptedString, 'base64').toString('utf-8');
+}
+
 @Injectable()
 export class KeycloakService {
   private adminToken: string;
@@ -29,7 +45,8 @@ export class KeycloakService {
 
   async validateToken(token: string): Promise<any> {
     try {
-      const decoded: any = jwt.decode(token);
+      const decryptedToken = decrypt(token);
+      const decoded: any = jwt.decode(decryptedToken);
       if (!decoded) {
         throw new UnauthorizedException('Invalid token');
       }
