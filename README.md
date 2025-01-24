@@ -17,13 +17,40 @@ npm install keycloak-api-node
 
 ## Configuration
 
-Set the following environment variables:
+You can initialize the KeycloakService with your configuration:
 
-```env
-KEYCLOAK_URL=https://your-keycloak-server
-KEYCLOAK_REALM=your-realm
-KEYCLOAK_CLIENT_ID=your-client-id
-KEYCLOAK_CLIENT_SECRET=your-client-secret
+```typescript
+import { KeycloakService } from 'keycloak-api-node';
+
+const keycloakService = new KeycloakService({
+  clientId: "your-client-id",
+  clientSecret: "your-client-secret",
+  issuer: "https://your-keycloak-server/realms/your-realm",
+  redirectUri: "http://localhost:3000/callback"
+});
+```
+
+For NestJS applications, you can provide the service in your module:
+
+```typescript
+import { Module } from '@nestjs/common';
+import { KeycloakService } from 'keycloak-api-node';
+
+@Module({
+  providers: [
+    {
+      provide: KeycloakService,
+      useValue: new KeycloakService({
+        clientId: "your-client-id",
+        clientSecret: "your-client-secret",
+        issuer: "https://your-keycloak-server/realms/your-realm",
+        redirectUri: "http://localhost:3000/callback"
+      })
+    }
+  ],
+  exports: [KeycloakService]
+})
+export class KeycloakModule {}
 ```
 
 ## Usage

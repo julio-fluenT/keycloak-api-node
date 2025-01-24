@@ -1,7 +1,13 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import * as jwt from 'jsonwebtoken';
 import axios from 'axios';
+
+interface KeycloakConfig {
+  clientId: string;
+  clientSecret: string;
+  issuer: string;
+  redirectUri: string;
+}
 
 @Injectable()
 export class KeycloakService {
@@ -10,20 +16,15 @@ export class KeycloakService {
   private readonly realm: string;
   private readonly clientId: string;
   private readonly clientSecret: string;
+  private readonly redirectUri: string;
 
-  constructor(private configService: ConfigService) {
-    this.keycloakUrl = this.getRequiredConfig('KEYCLOAK_URL');
-    this.realm = this.getRequiredConfig('KEYCLOAK_REALM');
-    this.clientId = this.getRequiredConfig('KEYCLOAK_CLIENT_ID');
-    this.clientSecret = this.getRequiredConfig('KEYCLOAK_CLIENT_SECRET');
-  }
-
-  private getRequiredConfig(key: string): string {
-    const value = this.configService.get<string>(key);
-    if (!value) {
-      throw new Error(`Required configuration "${key}" is missing`);
-    }
-    return value;
+  constructor(private config: KeycloakConfig) {
+    const issuerUrl = new URL(config.issuer);
+    this.keycloakUrl = `${issuerUrl.protocol}//${issuerUrl.host}`;
+    this.realm = issuerUrl.pathname.split('/').pop() || '';
+    this.clientId = config.clientId;
+    this.clientSecret = config.clientSecret;
+    this.redirectUri = config.redirectUri;
   }
 
   async validateToken(token: string): Promise<any> {
