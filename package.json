@@ -1,24 +1,27 @@
 {
   "name": "keycloak-api-node",
   "version": "1.0.0",
-  "description": "A Node.js package for Keycloak authentication and admin API integration",
+  "description": "A Node.js package for Keycloak authentication and admin API integration with secure token encryption",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "prepare": "npm run build",
+    "prepare": "pnpm run build",
     "test": "jest",
     "lint": "eslint \"src/**/*.ts\"",
-    "format": "prettier --write \"src/**/*.ts\""
+    "format": "prettier --write \"src/**/*.ts\"",
+    "prepublishOnly": "pnpm run test && pnpm run lint"
   },
   "keywords": [
     "keycloak",
     "authentication",
     "authorization",
     "nestjs",
-    "typescript"
+    "typescript",
+    "encryption",
+    "security"
   ],
-  "author": "",
+  "author": "Julio",
   "license": "MIT",
   "dependencies": {
     "@nestjs/common": "^10.0.0",
@@ -48,6 +51,9 @@
     "@nestjs/common": "^10.0.0",
     "@nestjs/config": "^3.0.0",
     "@nestjs/core": "^10.0.0"
+  },
+  "engines": {
+    "node": ">=14.0.0"
   },
   "files": [
     "dist/**/*"
