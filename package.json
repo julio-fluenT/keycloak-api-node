@@ -1,6 +1,6 @@
 {
   "name": "keycloak-api-node",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "A Node.js package for Keycloak authentication and admin API integration with secure token encryption",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

@@ -2,6 +2,8 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import axios from 'axios';
 import { encrypt, decrypt } from '../utils/encryption';
 import { getDecodedAccessToken } from '../utils/tokenUtils';
+import { ENCRYPTION_CONFIG } from './config/encryption.config';
+import { EncryptionStore } from './config/encryption.store';
 
 interface KeycloakConfig {
   clientId: string;
@@ -11,9 +13,6 @@ interface KeycloakConfig {
   encryptionKey?: string;
   iv?: string;
 }
-
-const DEFAULT_ENCRYPTION_KEY = 'f47ac10b58cc4372a5670e02b2c3d479';
-const DEFAULT_IV = '1e72d836a2f1d4b8';
 
 @Injectable()
 export class KeycloakService {
@@ -31,19 +30,20 @@ export class KeycloakService {
     this.clientId = config.clientId;
     this.clientSecret = config.clientSecret;
     this.redirectUri = config.redirectUri;
+
+    // Set up encryption config
     this.encryptionConfig = {
-      encryptionKey: config.encryptionKey || DEFAULT_ENCRYPTION_KEY,
-      iv: config.iv || DEFAULT_IV,
+      encryptionKey:
+        config.encryptionKey || ENCRYPTION_CONFIG.DEFAULT_ENCRYPTION_KEY,
+      iv: config.iv || ENCRYPTION_CONFIG.DEFAULT_IV,
     };
+
+    // Update the encryption store with the current config
+    EncryptionStore.getInstance().setConfig(this.encryptionConfig);
   }
 
   private decryptToken(encryptedToken: string): string {
     try {
-      console.log('Encryption config lengths:', {
-        keyLength: this.encryptionConfig.encryptionKey.length,
-        ivLength: this.encryptionConfig.iv.length,
-      });
-
       return decrypt(encryptedToken, this.encryptionConfig);
     } catch (error) {
       console.error('Token decryption failed:', {
@@ -150,6 +150,49 @@ export class KeycloakService {
       return response.data.map((role: any) => role.name);
     } catch (error) {
       throw new Error(`Failed to get user roles: ${error.message}`);
+    }
+  }
+
+  async getUserRolesByEmail(email: string): Promise<{ roles: string[] }> {
+    try {
+      const token = await this.generateAdminToken();
+      // Get user ID from email
+      const usersResponse = await axios.get(
+        `${this.keycloakUrl}/admin/realms/${this.realm}/users`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          params: {
+            email: email,
+            exact: true,
+          },
+        },
+      );
+
+      const users = usersResponse.data;
+      if (!users || users.length === 0) {
+        return { roles: [] };
+      }
+
+      const userId = users[0].id;
+
+      // Get user roles
+      const rolesResponse = await axios.get(
+        `${this.keycloakUrl}/admin/realms/${this.realm}/users/${userId}/role-mappings/realm`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+
+      return {
+        roles: rolesResponse.data.map((role: any) => role.name),
+      };
+    } catch (error) {
+      console.error('Error getting user roles:', error);
+      throw new UnauthorizedException('Failed to get user roles');
     }
   }
 }

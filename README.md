@@ -103,6 +103,56 @@ import { KeycloakModule } from 'keycloak-api-node';
 export class AppModule {}
 ```
 
+### Token Validation
+
+You can use the `@ValidateToken()` decorator to automatically validate tokens in your controllers:
+
+```typescript
+import { Controller, Get } from '@nestjs/common';
+import { ValidateToken } from 'keycloak-api-node';
+
+@Controller('users')
+export class UserController {
+  @Get('profile')
+  async getProfile(@ValidateToken() token: string) {
+    // token is already validated and decrypted
+    return this.userService.getProfile(token);
+  }
+}
+```
+
+The ValidateToken decorator will:
+- Extract the token from the Authorization header
+- Validate the token's format
+- Decrypt the token if necessary
+- Check token expiration
+- Throw UnauthorizedException if validation fails
+
+### Important Notes About Token Encryption
+
+The package uses a shared EncryptionStore to maintain consistent encryption settings across your application. This means:
+
+1. Encryption settings are shared application-wide
+2. The last configuration set will be used for all token validations
+3. If you're running multiple applications, they should use the same encryption settings
+
+For production environments, always:
+1. Set custom encryption keys through environment variables
+2. Use different keys for different environments
+3. Never use the default development keys
+
+### Role-Based Access Control
+
+Use the `@KeycloakRole()` decorator to protect routes:
+
+```typescript
+@Get('admin/users')
+@KeycloakRole('admin')
+async getUsers(@ValidateToken() token: string) {
+  return this.userService.getAllUsers(token);
+}
+```
+
 ### Using the Decorator
 
 ```typescript
