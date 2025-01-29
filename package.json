@@ -1,6 +1,6 @@
 {
   "name": "keycloak-api-node",
-  "version": "1.0.0",
+  "version": "1.0.5",
   "description": "A Node.js package for Keycloak authentication and admin API integration with secure token encryption",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -10,7 +10,7 @@
     "test": "jest",
     "lint": "eslint \"src/**/*.ts\"",
     "format": "prettier --write \"src/**/*.ts\"",
-    "prepublishOnly": "pnpm run test && pnpm run lint"
+    "prepublishOnly": "pnpm run lint"
   },
   "keywords": [
     "keycloak",

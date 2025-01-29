@@ -1,7 +1,7 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
-import * as jwt from 'jsonwebtoken';
 import axios from 'axios';
 import { encrypt, decrypt } from '../utils/encryption';
+import { getDecodedAccessToken } from '../utils/tokenUtils';
 
 interface KeycloakConfig {
   clientId: string;
@@ -17,7 +17,6 @@ const DEFAULT_IV = '1e72d836a2f1d4b8';
 
 @Injectable()
 export class KeycloakService {
-  private adminToken: string;
   private readonly keycloakUrl: string;
   private readonly realm: string;
   private readonly clientId: string;
@@ -38,18 +37,31 @@ export class KeycloakService {
     };
   }
 
-  private encryptToken(token: string): string {
-    return encrypt(token, this.encryptionConfig);
-  }
-
   private decryptToken(encryptedToken: string): string {
-    return decrypt(encryptedToken, this.encryptionConfig);
+    try {
+      console.log('Encryption config lengths:', {
+        keyLength: this.encryptionConfig.encryptionKey.length,
+        ivLength: this.encryptionConfig.iv.length,
+      });
+
+      return decrypt(encryptedToken, this.encryptionConfig);
+    } catch (error) {
+      console.error('Token decryption failed:', {
+        error: error.message,
+        tokenLength: encryptedToken?.length,
+      });
+      throw error;
+    }
   }
 
   async validateToken(token: string): Promise<any> {
     try {
-      const decryptedToken = this.decryptToken(token);
-      const decoded: any = jwt.decode(decryptedToken);
+      // Check if the token needs decryption
+      const decryptedToken = token.startsWith('eyJh')
+        ? token
+        : this.decryptToken(token);
+
+      const decoded: any = getDecodedAccessToken(decryptedToken);
       if (!decoded) {
         throw new UnauthorizedException('Invalid token');
       }
@@ -89,18 +101,19 @@ export class KeycloakService {
         },
       );
 
-      const token = response.data.access_token;
-      this.adminToken = this.encryptToken(token);
-      return this.adminToken;
+      return response.data.access_token;
     } catch (error) {
       console.error('Failed to generate admin token:', error);
       throw new Error('Failed to generate admin token');
     }
   }
 
+  private encryptToken(token: string): string {
+    return encrypt(token, this.encryptionConfig);
+  }
+
   async addRole(roleName: string, description?: string): Promise<void> {
-    const encryptedToken = await this.generateAdminToken();
-    const token = this.decryptToken(encryptedToken);
+    const token = await this.generateAdminToken();
 
     try {
       await axios.post(
@@ -122,8 +135,7 @@ export class KeycloakService {
   }
 
   async getUserRoles(userId: string): Promise<string[]> {
-    const encryptedToken = await this.generateAdminToken();
-    const token = this.decryptToken(encryptedToken);
+    const token = await this.generateAdminToken();
 
     try {
       const response = await axios.get(
