@@ -1,21 +1,24 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 import { encrypt, decrypt } from '../utils/encryption';
 import { getDecodedAccessToken } from '../utils/tokenUtils';
 import { ENCRYPTION_CONFIG } from './config/encryption.config';
 import { EncryptionStore } from './config/encryption.store';
-
-interface KeycloakConfig {
-  clientId: string;
-  clientSecret: string;
-  issuer: string;
-  redirectUri: string;
-  encryptionKey?: string;
-  iv?: string;
-}
+import {
+  KeycloakConfig,
+  KeycloakUser,
+  KeycloakRole,
+  KeycloakTokenResponse,
+} from './interfaces/keycloak.interface';
+import { KeycloakException } from './exceptions/keycloak.exception';
+import {
+  KEYCLOAK_ENDPOINTS,
+  ERROR_MESSAGES,
+} from './constants/keycloak.constants';
 
 @Injectable()
 export class KeycloakService {
+  private readonly logger = new Logger(KeycloakService.name);
   private readonly keycloakUrl: string;
   private readonly realm: string;
   private readonly clientId: string;
@@ -31,51 +34,56 @@ export class KeycloakService {
     this.clientSecret = config.clientSecret;
     this.redirectUri = config.redirectUri;
 
-    // Set up encryption config
     this.encryptionConfig = {
       encryptionKey:
         config.encryptionKey || ENCRYPTION_CONFIG.DEFAULT_ENCRYPTION_KEY,
       iv: config.iv || ENCRYPTION_CONFIG.DEFAULT_IV,
     };
 
-    // Update the encryption store with the current config
     EncryptionStore.getInstance().setConfig(this.encryptionConfig);
+  }
+
+  private encryptToken(token: string): string {
+    try {
+      return encrypt(token, this.encryptionConfig);
+    } catch (error) {
+      this.logger.error('Token encryption failed', error);
+      throw new KeycloakException('Token encryption failed');
+    }
   }
 
   private decryptToken(encryptedToken: string): string {
     try {
       return decrypt(encryptedToken, this.encryptionConfig);
     } catch (error) {
-      console.error('Token decryption failed:', {
+      this.logger.error('Token decryption failed', {
         error: error.message,
         tokenLength: encryptedToken?.length,
       });
-      throw error;
+      throw new KeycloakException('Token decryption failed');
     }
   }
 
   async validateToken(token: string): Promise<any> {
     try {
-      // Check if the token needs decryption
       const decryptedToken = token.startsWith('eyJh')
         ? token
         : this.decryptToken(token);
 
-      const decoded: any = getDecodedAccessToken(decryptedToken);
+      const decoded = getDecodedAccessToken(decryptedToken);
       if (!decoded) {
-        throw new UnauthorizedException('Invalid token');
+        throw new KeycloakException(ERROR_MESSAGES.INVALID_TOKEN);
       }
 
-      // Check token expiration
       const currentTime = Math.floor(Date.now() / 1000);
       if (decoded['exp'] && decoded['exp'] < currentTime) {
-        throw new UnauthorizedException('Token expired');
+        throw new KeycloakException(ERROR_MESSAGES.TOKEN_EXPIRED);
       }
 
       return decoded;
     } catch (error) {
-      console.error('Token validation error:', error);
-      throw new UnauthorizedException('Invalid token');
+      this.logger.error('Token validation error:', error);
+      throw new KeycloakException(ERROR_MESSAGES.INVALID_TOKEN);
     }
   }
 
@@ -87,8 +95,8 @@ export class KeycloakService {
 
   async generateAdminToken(): Promise<string> {
     try {
-      const response = await axios.post(
-        `${this.keycloakUrl}/realms/${this.realm}/protocol/openid-connect/token`,
+      const response = await axios.post<KeycloakTokenResponse>(
+        `${this.keycloakUrl}/realms/${this.realm}${KEYCLOAK_ENDPOINTS.TOKEN}`,
         new URLSearchParams({
           grant_type: 'client_credentials',
           client_id: this.clientId,
@@ -103,24 +111,20 @@ export class KeycloakService {
 
       return response.data.access_token;
     } catch (error) {
-      console.error('Failed to generate admin token:', error);
-      throw new Error('Failed to generate admin token');
+      this.logger.error('Failed to generate admin token:', error);
+      throw new KeycloakException(ERROR_MESSAGES.ADMIN_TOKEN_FAILED);
     }
   }
 
-  private encryptToken(token: string): string {
-    return encrypt(token, this.encryptionConfig);
-  }
-
-  async addRole(roleName: string, description?: string): Promise<void> {
+  async addRole(role: KeycloakRole): Promise<void> {
     const token = await this.generateAdminToken();
 
     try {
       await axios.post(
-        `${this.keycloakUrl}/admin/realms/${this.realm}/roles`,
+        `${this.keycloakUrl}/admin/realms/${this.realm}${KEYCLOAK_ENDPOINTS.ROLES}`,
         {
-          name: roleName,
-          description: description || `Role ${roleName}`,
+          name: role.name,
+          description: role.description || `Role ${role.name}`,
         },
         {
           headers: {
@@ -130,7 +134,8 @@ export class KeycloakService {
         },
       );
     } catch (error) {
-      throw new Error(`Failed to add role: ${error.message}`);
+      this.logger.error('Failed to add role:', error);
+      throw new KeycloakException(ERROR_MESSAGES.ROLE_CREATION_FAILED);
     }
   }
 
@@ -139,7 +144,7 @@ export class KeycloakService {
 
     try {
       const response = await axios.get(
-        `${this.keycloakUrl}/admin/realms/${this.realm}/users/${userId}/role-mappings`,
+        `${this.keycloakUrl}${KEYCLOAK_ENDPOINTS.USER_ROLES.replace('{realm}', this.realm).replace('{userId}', userId)}`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -149,22 +154,22 @@ export class KeycloakService {
 
       return response.data.map((role: any) => role.name);
     } catch (error) {
-      throw new Error(`Failed to get user roles: ${error.message}`);
+      this.logger.error('Failed to get user roles:', error);
+      throw new KeycloakException(ERROR_MESSAGES.USER_ROLES_FETCH_FAILED);
     }
   }
 
   async getUserRolesByEmail(email: string): Promise<{ roles: string[] }> {
     try {
       const token = await this.generateAdminToken();
-      // Get user ID from email
       const usersResponse = await axios.get(
-        `${this.keycloakUrl}/admin/realms/${this.realm}/users`,
+        `${this.keycloakUrl}${KEYCLOAK_ENDPOINTS.USERS.replace('{realm}', this.realm)}`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
           },
           params: {
-            email: email,
+            email,
             exact: true,
           },
         },
@@ -176,10 +181,8 @@ export class KeycloakService {
       }
 
       const userId = users[0].id;
-
-      // Get user roles
       const rolesResponse = await axios.get(
-        `${this.keycloakUrl}/admin/realms/${this.realm}/users/${userId}/role-mappings/realm`,
+        `${this.keycloakUrl}${KEYCLOAK_ENDPOINTS.USER_ROLES.replace('{realm}', this.realm).replace('{userId}', userId)}`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -191,8 +194,99 @@ export class KeycloakService {
         roles: rolesResponse.data.map((role: any) => role.name),
       };
     } catch (error) {
-      console.error('Error getting user roles:', error);
-      throw new UnauthorizedException('Failed to get user roles');
+      this.logger.error('Error getting user roles:', error);
+      throw new KeycloakException(ERROR_MESSAGES.USER_ROLES_FETCH_FAILED);
+    }
+  }
+
+  async registerUser(user: KeycloakUser): Promise<boolean> {
+    const token = await this.generateAdminToken();
+
+    try {
+      await axios.post(
+        `${this.keycloakUrl}${KEYCLOAK_ENDPOINTS.USERS.replace('{realm}', this.realm)}`,
+        {
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email,
+          enabled: user.enabled ?? true,
+          username: user.email,
+          credentials: user.password
+            ? [
+                {
+                  type: 'password',
+                  value: user.password,
+                  temporary: false,
+                },
+              ]
+            : undefined,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        },
+      );
+
+      if (user.roles?.length) {
+        const users = await axios.get(
+          `${this.keycloakUrl}${KEYCLOAK_ENDPOINTS.USERS.replace('{realm}', this.realm)}`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+            params: { email: user.email, exact: true },
+          },
+        );
+
+        if (users.data?.[0]?.id) {
+          const userId = users.data[0].id;
+          await this.assignRolesToUser(userId, user.roles);
+        }
+      }
+
+      return true;
+    } catch (error) {
+      this.logger.error('Failed to register user:', error);
+      throw new KeycloakException(ERROR_MESSAGES.USER_REGISTRATION_FAILED);
+    }
+  }
+
+  private async assignRolesToUser(
+    userId: string,
+    roles: string[],
+  ): Promise<void> {
+    const token = await this.generateAdminToken();
+
+    try {
+      const availableRoles = await axios.get(
+        `${this.keycloakUrl}${KEYCLOAK_ENDPOINTS.ROLES.replace('{realm}', this.realm)}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
+
+      const rolesToAssign = availableRoles.data
+        .filter((role: any) => roles.includes(role.name))
+        .map((role: any) => ({
+          id: role.id,
+          name: role.name,
+        }));
+
+      if (rolesToAssign.length) {
+        await axios.post(
+          `${this.keycloakUrl}${KEYCLOAK_ENDPOINTS.USER_ROLES.replace('{realm}', this.realm).replace('{userId}', userId)}`,
+          rolesToAssign,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+          },
+        );
+      }
+    } catch (error) {
+      this.logger.error('Failed to assign roles to user:', error);
+      throw new KeycloakException('Failed to assign roles to user');
     }
   }
 }
